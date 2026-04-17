@@ -1,0 +1,15 @@
+{
+  "hidden_size": 4096,
+  "num_draft_layers": 6,
+  "num_self_attn_heads": 16,
+  "num_self_attn_kv_heads": 4,
+  "num_cross_attn_heads": 16,
+  "num_cross_attn_kv_heads": 4,
+  "head_dim": 64,
+  "ffn_intermediate": 2048,
+  "block_size": 16,
+  "injection_dim": 20480,
+  "rope_theta": 8000000.0,
+  "rms_norm_eps": 1e-06,
+  "vocab_size": 262144
+}

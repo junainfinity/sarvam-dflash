@@ -1,0 +1,31 @@
+# Training data (too large for git, ~4TB when complete)
+dflash_training_data/
+
+# Model weights (not redistributable)
+sarvam-30b/
+
+# Trained checkpoints (large .pt files, 524MB–1.5GB each)
+checkpoints/
+
+# Logs and runtime files
+*.log
+*.pid
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# MLX artifacts
+dflash_mlx/__pycache__/
+*.npz
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+*.egg-info/
+dist/
+build/
