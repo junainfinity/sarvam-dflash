@@ -6,6 +6,8 @@ Based on the offline distillation approach from ["Training Domain Draft Models f
 
 **Hardware:** M3 Max MacBook Pro (128GB unified memory). Sarvam-30B runs fully in bfloat16 on MPS/CPU.
 
+> **Operational details:** For a full run history, current training status, crash recovery instructions, and step-by-step completion guide, see [`HANDOFF.md`](HANDOFF.md).
+
 ---
 
 ## Architecture

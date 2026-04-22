@@ -336,6 +336,18 @@ def train(args):
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     # -----------------------------------------------------------------------
+    # Warm-start from a prior model-only checkpoint (loads weights only, fresh LR schedule)
+    # -----------------------------------------------------------------------
+    if getattr(args, 'pretrain_checkpoint', None):
+        print(f"Warm-starting from {args.pretrain_checkpoint}...")
+        ckpt = torch.load(args.pretrain_checkpoint, weights_only=False, map_location="cpu")
+        state_dict = ckpt.get("model_state_dict", ckpt.get("state_dict", {}))
+        for name, param in draft_model.named_parameters():
+            if name in state_dict and param.requires_grad:
+                param.data.copy_(state_dict[name].to(param.device))
+        loaded = sum(1 for n in state_dict if any(n == k for k, p in draft_model.named_parameters() if p.requires_grad))
+        print(f"  Loaded {loaded}/{len(state_dict)} trainable tensors. Optimizer/scheduler reset (fresh LR schedule).")
+
     # Resume from checkpoint (if exists)
     # -----------------------------------------------------------------------
     os.makedirs(args.output_dir, exist_ok=True)
@@ -598,6 +610,10 @@ def parse_args():
 
     # DataLoader
     parser.add_argument("--num_workers", type=int, default=4)
+
+    # Warm-start (loads model weights only, ignores optimizer/scheduler from prior checkpoint)
+    parser.add_argument("--pretrain_checkpoint", type=str, default=None,
+                        help="Path to a model-only checkpoint for warm-starting weights (optimizer/LR schedule reset)")
 
     return parser.parse_args()
 
