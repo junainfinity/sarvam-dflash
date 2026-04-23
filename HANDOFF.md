@@ -5,7 +5,7 @@
 **GitHub:** https://github.com/junainfinity/sarvam-dflash
 **Hardware:** Apple M3 Max MacBook Pro, 128 GB unified memory
 
-> ⚠️ **CRITICAL — READ BEFORE TOUCHING CODE:** After the 4-day training completed successfully (best loss 0.8600), end-to-end testing revealed **0% acceptance rate** during speculative decoding. Root cause: our README cited the wrong paper, and our training has **three architectural mismatches** vs. the real DFlash algorithm. The current trained checkpoint **cannot be used for speculative decoding as intended** — the model must be retrained with corrected objective/mask/mask-embedding. See [`DEBUGGING_LOG.md`](DEBUGGING_LOG.md) for the full post-mortem, the three bugs, and the exact fix specification. **Do NOT proceed to MLX conversion or benchmark with the current checkpoint — it will not work.**
+> ⚠️ **CRITICAL — READ BEFORE TOUCHING CODE:** After the 4-day training completed successfully (best loss 0.8600), end-to-end testing revealed **0% acceptance rate** during speculative decoding. Root cause: our README cited the wrong paper, and our training has **three architectural mismatches** vs. the real DFlash algorithm. The current trained checkpoint **cannot be used for speculative decoding as intended** — the model must be retrained with corrected objective/mask/mask-embedding. See [`DEBUGGING_LOG.md`](DEBUGGING_LOG.md) for the full post-mortem and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the corrected Sarvam-30B + DFlash application architecture. **Do NOT proceed to MLX conversion or benchmark with the current checkpoint — it will not work.**
 
 ---
 

@@ -8,7 +8,7 @@ Based on the DFlash paper ["DFlash: Block Diffusion for Flash Speculative Decodi
 
 **Hardware:** M3 Max MacBook Pro (128GB unified memory). Sarvam-30B runs fully in bfloat16 on MPS/CPU.
 
-> **Operational details:** For a full run history, current training status, crash recovery instructions, and step-by-step completion guide, see [`HANDOFF.md`](HANDOFF.md).
+> **Operational details:** For a full run history, current training status, crash recovery instructions, and step-by-step completion guide, see [`HANDOFF.md`](HANDOFF.md). For Sarvam-30B internals, the corrected DFlash algorithm, and the end-to-end application architecture on M3 Max, see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 >
 > ⚠️ **Post-training status (2026-04-24):** The initial 4-day training completed (best loss 0.8600) but end-to-end speculative decoding tests showed **0% acceptance rate**. Root cause: our training has three architectural mismatches vs. the real DFlash paper (`arXiv 2602.06036`) — this README originally cited the wrong paper. A full post-mortem with the fix specification is in [`DEBUGGING_LOG.md`](DEBUGGING_LOG.md). The current checkpoint is a historical artifact; a corrected retrain is required.
 
