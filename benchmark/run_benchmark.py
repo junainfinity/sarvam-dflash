@@ -297,10 +297,11 @@ def run_dflash(
 
                 # For teacher forcing during speculation, we need to do iterative draft
                 # Actually in DFlash parallel mode: feed anchor, get all predictions at once
+                # Pass FULL context injection features — training used all ctx_len positions,
+                # not just the first block_size. Cross-attention handles variable-length KV.
                 draft_logits = draft_model(
                     input_ids=draft_input,
-                    injection_features=injection_feats[:, :block_size, :] if injection_feats.shape[1] >= block_size
-                        else torch.nn.functional.pad(injection_feats, (0, 0, 0, block_size - injection_feats.shape[1])),
+                    injection_features=injection_feats,
                     block_mask=block_mask,
                 )  # [1, block_size, V]
                 draft_passes += 1

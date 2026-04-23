@@ -1,9 +1,11 @@
 # HANDOFF.md — DFlash / Sarvam-30B Operational Guide
 
-**Last updated:** 2026-04-22  
-**Maintained by:** arjun / junainfinity  
-**GitHub:** https://github.com/junainfinity/sarvam-dflash  
+**Last updated:** 2026-04-24
+**Maintained by:** arjun / junainfinity
+**GitHub:** https://github.com/junainfinity/sarvam-dflash
 **Hardware:** Apple M3 Max MacBook Pro, 128 GB unified memory
+
+> ⚠️ **CRITICAL — READ BEFORE TOUCHING CODE:** After the 4-day training completed successfully (best loss 0.8600), end-to-end testing revealed **0% acceptance rate** during speculative decoding. Root cause: our README cited the wrong paper, and our training has **three architectural mismatches** vs. the real DFlash algorithm. The current trained checkpoint **cannot be used for speculative decoding as intended** — the model must be retrained with corrected objective/mask/mask-embedding. See [`DEBUGGING_LOG.md`](DEBUGGING_LOG.md) for the full post-mortem, the three bugs, and the exact fix specification. **Do NOT proceed to MLX conversion or benchmark with the current checkpoint — it will not work.**
 
 ---
 
@@ -345,8 +347,21 @@ sarvam-dflash/
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| Phase 1: Data Generation | ✅ Complete | 50,000 shards, 3.9 TB, verified clean |
-| Phase 2: Training | 🔄 In Progress | PID 68181, step ~9,170/12,500, ETA ~Apr 23 |
-| Phase 3: MLX Conversion | ⏳ Pending | Run after Phase 2 completes |
-| Phase 4: Benchmark | ⏳ Pending | Run after Phase 3 succeeds |
-| GitHub push w/ final results | ⏳ Pending | Update README training table, push HANDOFF.md |
+| Phase 1: Data Generation | ✅ Complete | 50,000 shards, 3.9 TB, verified clean. Reusable for retrain (causal features can be sliced per-anchor). |
+| Phase 2: Training (V2, 4 epochs) | ✅ Complete but **invalid** | Best loss 0.8600, but trained with the wrong objective. See `DEBUGGING_LOG.md`. |
+| Phase 2.5: Architecture fixes | ⏳ **Required next** | Add `mask_embedding`, bidirectional within-block mask, same-position mask-fill loss, per-anchor feature slicing. Fully specified in `DEBUGGING_LOG.md §5`. |
+| Phase 2.6: Retrain V3 | ⏳ **Blocked on Phase 2.5** | Cannot warm-start from V2 (new architecture). ~4 days wall-clock. |
+| Phase 3: MLX Conversion | ⏳ Blocked on V3 retrain | Current `weights.npz` was deleted during cleanup — wrong architecture. |
+| Phase 4: Benchmark | ⏳ Blocked on V3 retrain | Will show 0% acceptance with current weights. |
+
+### Disk state after 2026-04-24 cleanup
+
+| Directory | Contents | Size |
+|-----------|----------|------|
+| `checkpoints/` | `dflash_draft_best.pt` only (V2, loss 0.8600) — historical record | 524 MB |
+| `checkpoints_v1/` | `dflash_draft_best.pt` only (V1, loss 0.9364) — historical record | 524 MB |
+| `dflash_mlx/` | Source code only; `weights.npz` deleted | 28 KB |
+| `dflash_training_data/` | Untouched — 50,000 shards, reusable | ~3.9 TB |
+| `sarvam-30b/` | Untouched — target model weights | ~60 GB |
+
+~23 GB freed by deleting V1/V2 full-state checkpoints, interrupted/final duplicates, and the invalid MLX weights.

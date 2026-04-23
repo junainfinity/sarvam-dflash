@@ -2,11 +2,15 @@
 
 A DFlash (block diffusion speculative decoding) pipeline for [Sarvam-30B](https://huggingface.co/sarvamai/sarvam-m), a 30B parameter Mixture-of-Experts language model. This project trains a lightweight ~275M parameter draft model that generates 16-token blocks in parallel, conditioned on KV-injected hidden states from the frozen Sarvam-30B target — enabling speculative decoding without modifying the target model.
 
-Based on the offline distillation approach from ["Training Domain Draft Models for Speculative Decoding"](https://arxiv.org/abs/2503.07807) (arXiv 2503.07807), which is 11–25% better than online distillation.
+Based on the DFlash paper ["DFlash: Block Diffusion for Flash Speculative Decoding"](https://arxiv.org/abs/2602.06036) (Chen, Liang, Liu, Feb 2026, Z-Lab, `arXiv 2602.06036`). The parent block-diffusion formulation is Arriola et al. ["Block Diffusion"](https://arxiv.org/abs/2503.09573) (BD3-LMs, ICLR 2025 Oral).
+>
+> _Historical note: earlier versions of this README mistakenly cited `arXiv 2503.07807` — which is actually a different paper (Hong et al., SambaNova, on domain distillation for generic drafters). That citation contributed to the architectural bugs documented in `DEBUGGING_LOG.md`._
 
 **Hardware:** M3 Max MacBook Pro (128GB unified memory). Sarvam-30B runs fully in bfloat16 on MPS/CPU.
 
 > **Operational details:** For a full run history, current training status, crash recovery instructions, and step-by-step completion guide, see [`HANDOFF.md`](HANDOFF.md).
+>
+> ⚠️ **Post-training status (2026-04-24):** The initial 4-day training completed (best loss 0.8600) but end-to-end speculative decoding tests showed **0% acceptance rate**. Root cause: our training has three architectural mismatches vs. the real DFlash paper (`arXiv 2602.06036`) — this README originally cited the wrong paper. A full post-mortem with the fix specification is in [`DEBUGGING_LOG.md`](DEBUGGING_LOG.md). The current checkpoint is a historical artifact; a corrected retrain is required.
 
 ---
 
