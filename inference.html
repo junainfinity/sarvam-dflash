@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>DFlash V3 — Inference Acceptance Test</title>
+<style>
+  :root {
+    --bg:     #0b0d10;
+    --panel:  #141821;
+    --panel2: #1c2230;
+    --border: #2a3040;
+    --text:   #e6e9ef;
+    --muted:  #8b94a6;
+    --accent: #6ee7ff;
+    --good:   #4ade80;
+    --warn:   #fbbf24;
+    --bad:    #f87171;
+    --purple: #a5b4fc;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 2px 0; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  code { font-family: "SF Mono","Menlo","Consolas",monospace; font-size: 12px; color: var(--accent); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+  }
+  .panel h2 {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 12px 0;
+  }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pill.running .dot  { background: var(--good); box-shadow: 0 0 8px var(--good); animation: pulse 1.6s infinite; }
+  .pill.starting .dot { background: var(--warn); animation: pulse 1.2s infinite; }
+  .pill.completed .dot{ background: var(--accent); }
+  .pill.failed .dot   { background: var(--bad); }
+  @keyframes pulse { 0%,100% {opacity:1;} 50% {opacity:0.35;} }
+
+  .phases { display: flex; gap: 0; margin: 14px 0 8px 0; }
+  .phase {
+    flex: 1;
+    padding: 10px 8px;
+    border: 1px solid var(--border);
+    background: var(--panel2);
+    font-size: 11px;
+    color: var(--muted);
+    text-align: center;
+  }
+  .phase:first-child { border-radius: 8px 0 0 8px; }
+  .phase:last-child  { border-radius: 0 8px 8px 0; border-left: none; }
+  .phase:not(:first-child):not(:last-child) { border-left: none; }
+  .phase.done   { background: rgba(110,231,255,0.08); color: var(--accent); border-color: rgba(110,231,255,0.35); }
+  .phase.active { background: rgba(110,231,255,0.18); color: var(--text); border-color: var(--accent); }
+  .phase .step-num { display: block; font-weight: 600; font-size: 10px; opacity: 0.7; margin-bottom: 2px; }
+
+  .metric {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .metric-value {
+    font-variant-numeric: tabular-nums;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .metric-label {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .metric-sub {
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .metric-value.good { color: var(--good); }
+  .metric-value.warn { color: var(--warn); }
+  .metric-value.bad  { color: var(--bad); }
+
+  /* Prompt card */
+  .prompt-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 14px;
+  }
+  .prompt-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .prompt-title {
+    font-size: 13px;
+    color: var(--muted);
+    font-style: italic;
+  }
+  .prompt-num {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .mode-panel {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .mode-panel.baseline { border-left: 3px solid var(--purple); }
+  .mode-panel.dflash   { border-left: 3px solid var(--accent); }
+  .mode-title {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+
+  .mini-progress {
+    height: 6px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 8px 0 6px 0;
+  }
+  .mini-progress-bar {
+    height: 100%;
+    background: var(--purple);
+    transition: width 0.4s ease;
+  }
+  .mode-panel.dflash .mini-progress-bar { background: var(--accent); }
+
+  .mode-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 8px;
+  }
+  .mode-stats .v { color: var(--text); font-weight: 500; }
+  .mode-stats .v.good { color: var(--good); }
+
+  .output {
+    background: #05070a;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 11px;
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 11px;
+    line-height: 1.55;
+    color: #c9d1e0;
+    max-height: 100px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .output.empty { color: var(--muted); font-style: italic; font-family: inherit; }
+
+  .verdict {
+    padding: 14px 16px;
+    border-radius: 8px;
+    font-weight: 500;
+    margin-top: 6px;
+  }
+  .verdict.good { background: rgba(74,222,128,0.12); color: var(--good); border: 1px solid rgba(74,222,128,0.3); }
+  .verdict.warn { background: rgba(251,191,36,0.12); color: var(--warn); border: 1px solid rgba(251,191,36,0.3); }
+  .verdict.bad  { background: rgba(248,113,113,0.12); color: var(--bad); border: 1px solid rgba(248,113,113,0.3); }
+
+  .footer { margin-top: 24px; color: var(--muted); font-size: 11px; text-align: center; }
+
+  .nav { margin-bottom: 16px; }
+  .nav a { margin-right: 16px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="nav">
+    <a href="/">← Training dashboard</a>
+    <a href="/inference">Inference test</a>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px;">
+    <div>
+      <h1>V3 Inference Acceptance Test</h1>
+      <div class="sub">
+        Baseline Sarvam-30B vs. DFlash speculative decoding ·
+        <span id="stageLabel">connecting…</span>
+      </div>
+    </div>
+    <span id="statusPill" class="pill starting"><span class="dot"></span><span id="statusText">—</span></span>
+  </div>
+
+  <!-- Phase strip -->
+  <div class="panel" style="margin-bottom: 16px;">
+    <h2>Test stage</h2>
+    <div class="phases" id="phases">
+      <div class="phase" data-phase="loading_target"><span class="step-num">1</span>Load Sarvam-30B</div>
+      <div class="phase" data-phase="loading_draft"><span class="step-num">2</span>Load V3 draft</div>
+      <div class="phase" data-phase="running_baseline"><span class="step-num">3</span>Baseline generation</div>
+      <div class="phase" data-phase="running_dflash"><span class="step-num">4</span>DFlash generation</div>
+      <div class="phase" data-phase="done"><span class="step-num">5</span>Done</div>
+    </div>
+  </div>
+
+  <!-- Summary metrics (shown once all prompts complete) -->
+  <div id="summaryPanel" style="display:none;">
+    <div class="grid-4" style="margin-bottom: 16px;">
+      <div class="panel metric">
+        <div class="metric-label">Avg acceptance rate</div>
+        <div class="metric-value" id="sAccept">—</div>
+        <div class="metric-sub">higher = more draft tokens kept</div>
+      </div>
+      <div class="panel metric">
+        <div class="metric-label">Avg speedup</div>
+        <div class="metric-value" id="sSpeedup">—</div>
+        <div class="metric-sub">DFlash tok/s ÷ baseline tok/s</div>
+      </div>
+      <div class="panel metric">
+        <div class="metric-label">Baseline throughput</div>
+        <div class="metric-value" id="sBaseline">—</div>
+        <div class="metric-sub">tokens / second</div>
+      </div>
+      <div class="panel metric">
+        <div class="metric-label">DFlash throughput</div>
+        <div class="metric-value" id="sDflash">—</div>
+        <div class="metric-sub">tokens / second</div>
+      </div>
+    </div>
+    <div id="verdictBox"></div>
+  </div>
+
+  <!-- Per-prompt cards -->
+  <div id="promptCards"></div>
+
+  <!-- Error panel -->
+  <div id="errorPanel" class="panel" style="display:none; border-color: rgba(248,113,113,0.5);">
+    <h2 style="color: var(--bad);">Error</h2>
+    <pre style="font-family: 'SF Mono', monospace; font-size: 11px; color: var(--bad); margin: 0; white-space: pre-wrap;" id="errorText"></pre>
+  </div>
+
+  <div class="footer">
+    Refreshes every 2s. State written to <code>inference_test_state.json</code>.<br>
+    Close this tab, close Claude — the test keeps running. Relaunch with <code>./launch_inference.sh</code>.
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const PHASE_ORDER = ['loading_target', 'loading_draft', 'running_baseline', 'running_dflash', 'done'];
+
+  function setPhase(phase) {
+    const idx = PHASE_ORDER.indexOf(phase);
+    document.querySelectorAll('.phase').forEach((el, i) => {
+      el.classList.remove('active', 'done');
+      if (i < idx) el.classList.add('done');
+      else if (i === idx) el.classList.add('active');
+    });
+  }
+
+  function classForAccept(r) {
+    if (r >= 0.2) return 'good';
+    if (r >= 0.05) return 'warn';
+    return 'bad';
+  }
+  function classForSpeedup(s) {
+    if (s >= 1.5) return 'good';
+    if (s >= 1.0) return 'warn';
+    return 'bad';
+  }
+
+  function renderModePanel(mode, data, maxTokens) {
+    const isBaseline = mode === 'baseline';
+    if (!data) {
+      return `<div class="mode-panel ${mode}">
+        <div class="mode-title">${isBaseline ? 'Baseline Sarvam-30B' : 'DFlash V3'}</div>
+        <div class="mode-stats" style="font-style:italic;">queued</div>
+        <div class="output empty">—</div>
+      </div>`;
+    }
+    const pct = ((data.tokens_generated || 0) / (maxTokens || 64)) * 100;
+    let extras = '';
+    if (!isBaseline) {
+      const accCls = classForAccept(data.acceptance_rate || 0);
+      const spdCls = data.speedup ? classForSpeedup(data.speedup) : '';
+      extras = `
+        <div class="mode-stats">
+          <span>Accept: <span class="v ${accCls}">${((data.acceptance_rate || 0)*100).toFixed(1)}%</span></span>
+          <span>Blocks: <span class="v">${data.blocks_generated || 0}</span></span>
+          <span>Speedup: <span class="v ${spdCls}">${(data.speedup || 0).toFixed(2)}×</span></span>
+        </div>`;
+    }
+    return `<div class="mode-panel ${mode}">
+      <div class="mode-title">${isBaseline ? 'Baseline Sarvam-30B' : 'DFlash V3'} · ${data.status || '—'}</div>
+      <div class="mini-progress"><div class="mini-progress-bar" style="width:${pct.toFixed(1)}%;"></div></div>
+      <div class="mode-stats">
+        <span>Tokens: <span class="v">${data.tokens_generated || 0}/${maxTokens}</span></span>
+        <span>Time: <span class="v">${(data.elapsed_s || 0).toFixed(1)}s</span></span>
+        <span>Rate: <span class="v">${(data.tok_per_sec || 0).toFixed(2)} tok/s</span></span>
+      </div>
+      ${extras}
+      <div class="output ${data.output ? '' : 'empty'}">${data.output ? escapeHtml(data.output) : '—'}</div>
+    </div>`;
+  }
+
+  function escapeHtml(s) {
+    return (s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function render(data) {
+    if (!data) return;
+
+    // Status pill
+    const pill = $('statusPill');
+    const st = data.status || 'starting';
+    pill.className = 'pill ' + st;
+    $('statusText').textContent = st === 'starting' ? 'starting' :
+                                   st === 'running' ? 'running' :
+                                   st === 'completed' ? 'completed ✓' :
+                                   st === 'failed' ? 'failed ✗' : st;
+    $('stageLabel').textContent = data.stage_label || data.stage || '—';
+
+    setPhase(data.stage);
+
+    // Error panel
+    if (data.status === 'failed' && data.error) {
+      $('errorPanel').style.display = 'block';
+      $('errorText').textContent = data.error;
+    } else {
+      $('errorPanel').style.display = 'none';
+    }
+
+    // Per-prompt cards
+    const prompts = data.prompts || [];
+    const cardsHtml = prompts.map((p, i) => {
+      const maxTokens = (p.baseline && p.baseline.max_tokens) ||
+                        (p.dflash && p.dflash.max_tokens) || 64;
+      return `<div class="prompt-card">
+        <div class="prompt-header">
+          <div>
+            <div class="prompt-num">Prompt ${i + 1} / ${prompts.length}</div>
+            <div class="prompt-title">"${escapeHtml(p.text)}"</div>
+          </div>
+        </div>
+        <div class="modes">
+          ${renderModePanel('baseline', p.baseline, maxTokens)}
+          ${renderModePanel('dflash', p.dflash, maxTokens)}
+        </div>
+      </div>`;
+    }).join('');
+    $('promptCards').innerHTML = cardsHtml;
+
+    // Summary
+    if (data.summary && data.status === 'completed') {
+      const s = data.summary;
+      $('summaryPanel').style.display = 'block';
+      const accVal = s.dflash_avg_acceptance;
+      const spdVal = s.dflash_avg_speedup;
+      $('sAccept').textContent = (accVal * 100).toFixed(1) + '%';
+      $('sAccept').className = 'metric-value ' + classForAccept(accVal);
+      $('sSpeedup').textContent = spdVal.toFixed(2) + '×';
+      $('sSpeedup').className = 'metric-value ' + classForSpeedup(spdVal);
+      $('sBaseline').textContent = s.baseline_avg_tok_per_sec.toFixed(2);
+      $('sDflash').textContent = s.dflash_avg_tok_per_sec.toFixed(2);
+
+      // Verdict
+      let verdict = '';
+      if (accVal >= 0.2 && spdVal >= 1.5) {
+        verdict = `<div class="verdict good">✓ Success. DFlash V3 is producing meaningful acceptance (${(accVal*100).toFixed(1)}%) and a real speedup (${spdVal.toFixed(2)}×). Ready to benchmark and ship.</div>`;
+      } else if (accVal >= 0.05) {
+        verdict = `<div class="verdict warn">⚠ Partial success — the architecture works (${(accVal*100).toFixed(1)}% acceptance) but the model likely needs more training (V3 saw ~128× less signal than V2). Consider running more epochs.</div>`;
+      } else {
+        verdict = `<div class="verdict bad">✗ Low acceptance (${(accVal*100).toFixed(1)}%). Either there's a remaining bug in the inference path, or the model is drastically under-trained. Investigate before benchmarking.</div>`;
+      }
+      $('verdictBox').innerHTML = verdict;
+    } else {
+      $('summaryPanel').style.display = 'none';
+    }
+  }
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/inference-status', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      render(data);
+    } catch (e) {
+      $('statusText').textContent = 'server unreachable';
+      $('statusPill').className = 'pill failed';
+    }
+  }
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

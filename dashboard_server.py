@@ -30,6 +30,10 @@ LOG_FILE    = PROJECT_DIR / "dflash_training_v3.log"
 HTML_FILE   = PROJECT_DIR / "dashboard.html"
 CKPT_DIR    = PROJECT_DIR / "checkpoints"
 
+# Inference test
+INFERENCE_HTML       = PROJECT_DIR / "inference.html"
+INFERENCE_STATE_FILE = PROJECT_DIR / "inference_test_state.json"
+
 PORT = int(os.environ.get("DFLASH_DASHBOARD_PORT", "8765"))
 
 # ---------------------------------------------------------------------------
@@ -200,8 +204,17 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"error": f"dashboard.html missing: {e}"}, 500)
                 return
             self._send_html(body)
+        elif path == "/inference":
+            try:
+                body = INFERENCE_HTML.read_bytes()
+            except Exception as e:
+                self._send_json({"error": f"inference.html missing: {e}"}, 500)
+                return
+            self._send_html(body)
         elif path == "/api/status":
             self._api_status()
+        elif path == "/api/inference-status":
+            self._api_inference_status()
         elif path == "/api/ping":
             self._send_json({"ok": True})
         else:
@@ -229,6 +242,27 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({"error": "process vanished"}, 400)
         except Exception as e:
             self._send_json({"error": str(e)}, 500)
+
+    def _api_inference_status(self):
+        if not INFERENCE_STATE_FILE.exists():
+            self._send_json({
+                "status": "not_started",
+                "stage": "init",
+                "stage_label": "Waiting — run ./launch_inference.sh",
+                "prompts": [],
+                "summary": None,
+            })
+            return
+        try:
+            data = json.loads(INFERENCE_STATE_FILE.read_text())
+            self._send_json(data)
+        except Exception as e:
+            self._send_json({
+                "status": "error",
+                "stage": "unknown",
+                "stage_label": f"Could not parse state file: {e}",
+                "prompts": [],
+            }, 500)
 
     def _api_status(self):
         pid = read_pid()
