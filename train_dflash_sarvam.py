@@ -35,7 +35,13 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset
 from torch.nn.utils import clip_grad_norm_
 
-from dflash_draft import DFlashConfig, DFlashDraftModel, make_block_causal_mask, make_sequence_position_weights
+from dflash_draft import (
+    DFlashConfig, DFlashDraftModel,
+    make_block_causal_mask,              # legacy V1/V2
+    make_block_bidirectional_mask,       # DFlash V3 — correct
+    make_sequence_position_weights,      # for V1/V2 whole-seq loss
+    make_position_weights,               # single-block weights for V3
+)
 from dflash_data import DFlashDataset
 from modeling_sarvam_moe_dflash import SarvamMoEForCausalLMWithKVInjection, SarvamMoEConfig
 
@@ -366,12 +372,12 @@ def train(args):
     # -----------------------------------------------------------------------
     # Pre-compute masks and weights
     # -----------------------------------------------------------------------
-    block_mask = make_block_causal_mask(
-        args.max_seq_len, args.block_size, dtype=torch.bfloat16, device=device
+    # V3 DFlash: bidirectional within-block + single-block position weights.
+    # The [16, 16] mask is tiny; reused every step.
+    block_mask_v3 = make_block_bidirectional_mask(
+        args.block_size, args.block_size, dtype=torch.bfloat16, device=device
     )
-    position_weights = make_sequence_position_weights(
-        args.max_seq_len, args.block_size, device=device
-    )
+    block_position_weights = make_position_weights(args.block_size, device=device)  # [16], anchor=0
 
     # -----------------------------------------------------------------------
     # Wandb
@@ -438,39 +444,78 @@ def train(args):
             teacher_logit_vals = batch["teacher_top_logits"].to(device)
             teacher_logit_idxs = batch["teacher_top_indices"].to(device)
 
-            # Trim to max_seq_len and ensure divisible by block_size
+            # Trim sequence to a multiple of block_size (should already be 2048)
             S = input_ids.shape[1]
             S = (S // args.block_size) * args.block_size
-            input_ids = input_ids[:, :S]
-            injection_feats = injection_feats[:, :S]
-            teacher_logit_vals = teacher_logit_vals[:, :S]
-            teacher_logit_idxs = teacher_logit_idxs[:, :S]
+            B = input_ids.shape[0]
+            L = args.block_size
 
-            current_mask = block_mask[:S, :S] if S < args.max_seq_len else block_mask
+            # -----------------------------------------------------------------
+            # V3 DFlash training step
+            # -----------------------------------------------------------------
+            # 1. Sample a random anchor position P for this batch (shared
+            #    across samples for simplicity — different P per batch gives
+            #    position coverage across the training run).
+            max_P = S - L
+            P = int(torch.randint(0, max_P + 1, (1,)).item())
+
+            # 2. Slice to the block
+            block_input_ids = input_ids[:, P:P + L]                         # [B, L]
+            # Teacher alignment for KL:
+            #   draft logit at block pos i (for i >= 1) predicts token at abs pos P+i.
+            #   Teacher's distribution for token at abs pos P+i is stored at
+            #   teacher_logit_vals[P+i-1] (HF convention: logits[k] = distribution
+            #   for token k+1 given tokens 0..k). So for block positions 1..L-1 we
+            #   need teacher at abs positions P..P+L-2 (length L-1).
+            # We pad the front with zeros so shapes match [B, L, K]; the anchor
+            # position has weight 0 in the loss anyway.
+            kl_start = max(P, 0)  # P should always be >= 0 but guard anyway
+            block_teach_logits = F.pad(
+                teacher_logit_vals[:, kl_start:kl_start + L - 1, :],
+                (0, 0, 1, 0),  # pad length dim front by 1 (the anchor, zeroed)
+            )  # [B, L, K]
+            block_teach_indices = F.pad(
+                teacher_logit_idxs[:, kl_start:kl_start + L - 1, :],
+                (0, 0, 1, 0),
+            )  # [B, L, K]
+
+            # 3. Context features up to and including the anchor position.
+            #    Sarvam-30B is causal, so features[:, :P+1, :] was computed from
+            #    tokens 0..P only — no leakage of later tokens.
+            context_feats = injection_feats[:, :P + 1, :]                   # [B, P+1, 20480]
+
+            # 4. Mask positions: True at positions 1..L-1 within the block
+            #    (anchor position 0 keeps its real token embedding).
+            mask_positions = torch.zeros(B, L, dtype=torch.bool, device=device)
+            mask_positions[:, 1:] = True                                    # [B, L]
+
+            # 5. Absolute RoPE positions for the block (P..P+L-1) so the
+            #    rotary embedding matches what a full-seq training would have
+            #    given these positions. Matters because cross-attn keys are
+            #    context at absolute positions 0..P.
+            position_ids = torch.arange(P, P + L, device=device).unsqueeze(0).expand(B, -1)
 
             # Only use autocast on CUDA; MPS and CPU run without it
             autocast_enabled = torch.cuda.is_available()
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=autocast_enabled):
                 draft_logits = draft_model(
-                    input_ids=input_ids,
-                    injection_features=injection_feats,
-                    block_mask=current_mask,
-                )
+                    input_ids=block_input_ids,
+                    injection_features=context_feats,
+                    block_mask=block_mask_v3,
+                    position_ids=position_ids,
+                    mask_positions=mask_positions,
+                )  # [B, L, V]
 
-                # Position-weighted CE loss
-                shift_logits = draft_logits[:, :-1]
-                shift_labels = input_ids[:, 1:]
-                per_token_ce = chunked_cross_entropy(shift_logits, shift_labels)
-                pw = position_weights[:S - 1]
-                ce_loss = (per_token_ce * pw.unsqueeze(0)).sum() / (pw.sum() * per_token_ce.shape[0])
+                # Same-position CE (no shift): logit[i] predicts token[i].
+                per_pos_ce = chunked_cross_entropy(draft_logits, block_input_ids)  # [B, L]
+                pw = block_position_weights                                        # [L], anchor=0
+                ce_loss = (per_pos_ce * pw.unsqueeze(0)).sum() / (pw.sum() * B)
 
-                # Position-weighted KL distillation loss
-                per_token_kl = sparse_kl_divergence(
-                    draft_logits[:, :-1],
-                    teacher_logit_vals[:, 1:],
-                    teacher_logit_idxs[:, 1:],
-                )
-                kl_loss = (per_token_kl * pw.unsqueeze(0)).sum() / (pw.sum() * per_token_kl.shape[0])
+                # Same-position sparse KL against teacher top-K at those positions.
+                per_pos_kl = sparse_kl_divergence(
+                    draft_logits, block_teach_logits, block_teach_indices,
+                )  # [B, L]
+                kl_loss = (per_pos_kl * pw.unsqueeze(0)).sum() / (pw.sum() * B)
 
                 loss = (1.0 - args.kl_weight) * ce_loss + args.kl_weight * kl_loss
                 loss = loss / args.grad_accum

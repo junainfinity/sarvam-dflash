@@ -6,6 +6,7 @@ sarvam-30b/
 
 # Trained checkpoints (large .pt files, 524MB–1.5GB each)
 checkpoints/
+checkpoints_v1/
 
 # Logs and runtime files
 *.log

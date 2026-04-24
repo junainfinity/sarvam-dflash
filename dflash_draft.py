@@ -320,10 +320,36 @@ def make_block_causal_mask(
     device: torch.device = torch.device("cpu"),
 ) -> torch.Tensor:
     """
-    Create a block-diagonal causal attention mask for SDPA.
+    Block-diagonal *causal* attention mask. DEPRECATED for DFlash —
+    use `make_block_bidirectional_mask` instead. Kept for V1/V2 compatibility.
 
     Within each block of `block_size` tokens, causal masking applies
     (token k can attend to positions 0..k). Across blocks, no attention.
+    """
+    assert seq_len % block_size == 0, f"seq_len {seq_len} must be divisible by block_size {block_size}"
+    num_blocks = seq_len // block_size
+    block = torch.tril(torch.ones(block_size, block_size, dtype=torch.bool, device=device))
+    full_mask = torch.zeros(seq_len, seq_len, dtype=torch.bool, device=device)
+    for i in range(num_blocks):
+        s = i * block_size
+        full_mask[s:s+block_size, s:s+block_size] = block
+    return torch.where(full_mask, torch.tensor(0.0, dtype=dtype, device=device),
+                       torch.tensor(float("-inf"), dtype=dtype, device=device))
+
+
+def make_block_bidirectional_mask(
+    seq_len: int,
+    block_size: int = 16,
+    dtype: torch.dtype = torch.float32,
+    device: torch.device = torch.device("cpu"),
+) -> torch.Tensor:
+    """
+    Block-diagonal *bidirectional* attention mask for DFlash.
+
+    Within each block of `block_size` tokens, every position attends to every
+    other position (full bidirectional within-block attention). Across blocks,
+    no attention. This is the mask DFlash uses — enables the draft to fill in
+    masked positions given the anchor + other masks + target KV injection.
 
     Args:
         seq_len: total sequence length (must be divisible by block_size)
@@ -336,21 +362,14 @@ def make_block_causal_mask(
     """
     assert seq_len % block_size == 0, f"seq_len {seq_len} must be divisible by block_size {block_size}"
     num_blocks = seq_len // block_size
-
-    # Causal mask for one block [block_size, block_size]
-    block = torch.tril(torch.ones(block_size, block_size, dtype=torch.bool, device=device))
-
-    # Build block-diagonal mask
+    # Bidirectional within block: every position sees every other position
+    block = torch.ones(block_size, block_size, dtype=torch.bool, device=device)
     full_mask = torch.zeros(seq_len, seq_len, dtype=torch.bool, device=device)
     for i in range(num_blocks):
-        start = i * block_size
-        end = start + block_size
-        full_mask[start:end, start:end] = block
-
-    # Convert to SDPA format: 0 for attend, -inf for mask
-    attn_mask = torch.where(full_mask, torch.tensor(0.0, dtype=dtype, device=device),
-                            torch.tensor(float("-inf"), dtype=dtype, device=device))
-    return attn_mask  # [seq_len, seq_len]
+        s = i * block_size
+        full_mask[s:s+block_size, s:s+block_size] = block
+    return torch.where(full_mask, torch.tensor(0.0, dtype=dtype, device=device),
+                       torch.tensor(float("-inf"), dtype=dtype, device=device))
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +403,12 @@ class DFlashDraftModel(nn.Module):
         # RoPE (same config as Sarvam-30B: theta=8M, head_dim=64)
         rope_config = config.to_rope_config()
         self.rotary_emb = SarvamMoERotaryEmbedding(config=rope_config)
+
+        # Learned mask embedding placed at non-anchor positions within each block
+        # (V3 DFlash). A single learned vector broadcast across the L-1 masked
+        # positions per block, used at both training and inference time.
+        self.mask_embedding = nn.Parameter(torch.zeros(config.hidden_size))
+        nn.init.normal_(self.mask_embedding, mean=0.0, std=config.initializer_range)
 
         # Initialize weights
         self.apply(self._init_weights)
@@ -428,15 +453,25 @@ class DFlashDraftModel(nn.Module):
         injection_features: torch.Tensor,                      # [B, ctx_len, 20480]
         block_mask: Optional[torch.Tensor] = None,             # [seq_len, seq_len]
         position_ids: Optional[torch.LongTensor] = None,       # [B, seq_len]
+        mask_positions: Optional[torch.Tensor] = None,         # [B, seq_len] bool
     ) -> torch.Tensor:
         """
         Forward pass of the draft model.
 
         Args:
-            input_ids: token IDs [B, seq_len]
+            input_ids: token IDs [B, seq_len]. At positions flagged True in
+                `mask_positions`, the token is ignored and the learned
+                `mask_embedding` is used instead (DFlash training + inference).
             injection_features: target hidden states [B, ctx_len, 20480]
-            block_mask: block-diagonal causal mask [seq_len, seq_len]
-            position_ids: position IDs for RoPE [B, seq_len]
+            block_mask: attention mask [seq_len, seq_len]. For DFlash use
+                `make_block_bidirectional_mask`; the causal variant is legacy.
+            position_ids: position IDs for RoPE [B, seq_len]. If None, uses
+                0..seq_len-1. Note: for DFlash block prediction, pass the
+                *absolute* RoPE positions of the block (e.g. P..P+L-1), not
+                0..L-1 — the training sequence was 2048 long with absolute
+                positions, so inference must mirror that.
+            mask_positions: [B, seq_len] bool. True where the learned mask
+                embedding should replace the token embedding.
 
         Returns:
             logits: [B, seq_len, vocab_size]
@@ -451,6 +486,18 @@ class DFlashDraftModel(nn.Module):
         draft_device = self.kv_fusion.kv_proj.weight.device
         hidden_states = hidden_states.to(draft_device)
         injection_features = injection_features.to(draft_device)
+
+        # Apply learned mask embedding at flagged positions (DFlash V3)
+        if mask_positions is not None:
+            mask_positions = mask_positions.to(draft_device)  # [B, S] bool
+            # Broadcast mask_embedding [H] to [B, S, H] for selective replace.
+            mask_broadcast = self.mask_embedding.to(hidden_states.dtype) \
+                .view(1, 1, -1).expand(B, S, -1)                 # [B, S, H]
+            hidden_states = torch.where(
+                mask_positions.unsqueeze(-1),                    # [B, S, 1]
+                mask_broadcast,                                  # [B, S, H]
+                hidden_states,                                   # [B, S, H]
+            )
 
         # Position IDs
         if position_ids is None:
