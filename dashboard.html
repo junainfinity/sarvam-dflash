@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>DFlash V3 — Sarvam-30B Training Dashboard</title>
+<style>
+  :root {
+    --bg:        #0b0d10;
+    --panel:     #141821;
+    --panel-2:   #1c2230;
+    --border:    #2a3040;
+    --text:      #e6e9ef;
+    --muted:     #8b94a6;
+    --accent:    #6ee7ff;
+    --accent-2:  #a5b4fc;
+    --good:      #4ade80;
+    --warn:      #fbbf24;
+    --bad:       #f87171;
+    --paused:    #c084fc;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 2px 0; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  code { font-family: "SF Mono","Menlo","Consolas",monospace; font-size: 12px; color: var(--accent); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .panel h2 {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 12px 0;
+  }
+  .metric {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .metric-value {
+    font-variant-numeric: tabular-nums;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+  .metric-label {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .metric-sub {
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Status pill */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+  }
+  .pill.running  .dot { background: var(--good);   box-shadow: 0 0 8px var(--good); animation: pulse 1.6s infinite; }
+  .pill.paused   .dot { background: var(--paused); box-shadow: 0 0 8px var(--paused); }
+  .pill.stopped  .dot { background: var(--bad); }
+  .pill.starting .dot { background: var(--warn); animation: pulse 1.2s infinite; }
+  .pill.completed .dot{ background: var(--accent); }
+  @keyframes pulse { 0%,100% {opacity: 1;} 50% {opacity: 0.35;} }
+
+  /* Phase timeline */
+  .phases {
+    display: flex;
+    gap: 0;
+    margin: 14px 0 8px 0;
+  }
+  .phase {
+    flex: 1;
+    padding: 10px 8px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    font-size: 12px;
+    color: var(--muted);
+    position: relative;
+    text-align: center;
+  }
+  .phase:first-child { border-radius: 8px 0 0 8px; }
+  .phase:last-child  { border-radius: 0 8px 8px 0; border-left: none; }
+  .phase:not(:first-child):not(:last-child) { border-left: none; }
+  .phase.done   { background: rgba(110,231,255,0.08); color: var(--accent);   border-color: rgba(110,231,255,0.35); }
+  .phase.active { background: rgba(110,231,255,0.18); color: var(--text);     border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .phase .step-num {
+    display: block;
+    font-weight: 600;
+    font-size: 11px;
+    opacity: 0.7;
+    margin-bottom: 2px;
+  }
+
+  /* Progress bar */
+  .progress-wrap {
+    height: 28px;
+    background: var(--panel-2);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    position: relative;
+  }
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #4f46e5 0%, #6ee7ff 100%);
+    transition: width 0.6s ease;
+    position: relative;
+  }
+  .progress-bar.paused { background: linear-gradient(90deg, #7c3aed 0%, #c084fc 100%); }
+  .progress-label {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    mix-blend-mode: screen;
+  }
+
+  /* Buttons */
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, transform 0.08s;
+    font-family: inherit;
+  }
+  button:hover:not(:disabled) { background: #212636; border-color: #3a4258; }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: 0.35; cursor: not-allowed; }
+  button.pause  { border-color: rgba(251,191,36,0.4); color: var(--warn); }
+  button.pause:hover:not(:disabled) { background: rgba(251,191,36,0.1); }
+  button.resume { border-color: rgba(74,222,128,0.4); color: var(--good); }
+  button.resume:hover:not(:disabled) { background: rgba(74,222,128,0.1); }
+  button.cancel { border-color: rgba(248,113,113,0.4); color: var(--bad); }
+  button.cancel:hover:not(:disabled) { background: rgba(248,113,113,0.15); }
+
+  /* Chart */
+  #lossChart {
+    width: 100%;
+    height: 180px;
+    border-radius: 8px;
+  }
+  .chart-legend {
+    display: flex;
+    gap: 14px;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  .chart-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .chart-legend .sw { width: 10px; height: 2px; border-radius: 1px; }
+
+  /* Log tail */
+  .log-tail {
+    background: #05070a;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    max-height: 220px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    color: #c9d1e0;
+  }
+  .log-tail .line-step { color: var(--accent); }
+  .log-tail .line-save { color: var(--good); }
+  .log-tail .line-err  { color: var(--bad); }
+
+  /* Checkpoint list */
+  .ckpt-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .ckpt-row:last-child { border-bottom: none; }
+  .ckpt-name { color: var(--text); }
+  .ckpt-meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* Toast */
+  #toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 10px 16px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+    max-width: 320px;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.ok  { border-color: rgba(74,222,128,0.5); }
+  #toast.err { border-color: rgba(248,113,113,0.5); }
+
+  .footer { margin-top: 24px; color: var(--muted); font-size: 11px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px;">
+    <div>
+      <h1>DFlash V3 · Sarvam-30B</h1>
+      <div class="sub">M3 Max · 128 GB · <span id="pidText">PID —</span> · Auto-refreshes every 2s</div>
+    </div>
+    <span id="statePill" class="pill starting"><span class="dot"></span><span id="stateText">connecting…</span></span>
+  </div>
+
+  <!-- Phase timeline -->
+  <div class="panel" style="margin-bottom: 16px;">
+    <h2>Pipeline phase</h2>
+    <div class="phases" id="phases">
+      <div class="phase" data-phase="loading_target"><span class="step-num">1</span>Load Sarvam-30B</div>
+      <div class="phase" data-phase="starting_training"><span class="step-num">2</span>Setup training</div>
+      <div class="phase" data-phase="training"><span class="step-num">3</span>Train draft</div>
+      <div class="phase" data-phase="saving"><span class="step-num">4</span>Save final checkpoint</div>
+      <div class="phase" data-phase="completed"><span class="step-num">5</span>Done</div>
+    </div>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="panel" style="margin-bottom: 16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h2 style="margin:0;">Training progress</h2>
+      <span class="metric-sub" id="epochLabel">—</span>
+    </div>
+    <div class="progress-wrap" style="margin-top:10px;">
+      <div class="progress-bar" id="progBar" style="width:0%;"></div>
+      <div class="progress-label" id="progLabel">— / — (0.0%)</div>
+    </div>
+    <div class="controls">
+      <button class="pause"  id="btnPause">⏸ Pause</button>
+      <button class="resume" id="btnResume">▶ Resume</button>
+      <button class="cancel" id="btnCancel">■ Cancel (saves checkpoint)</button>
+    </div>
+  </div>
+
+  <!-- Metrics row -->
+  <div class="grid-4" style="margin-bottom: 16px;">
+    <div class="panel metric">
+      <div class="metric-label">Loss</div>
+      <div class="metric-value" id="mLoss">—</div>
+      <div class="metric-sub" id="mLossSub">—</div>
+    </div>
+    <div class="panel metric">
+      <div class="metric-label">Learning rate</div>
+      <div class="metric-value" id="mLR">—</div>
+      <div class="metric-sub">cosine decay</div>
+    </div>
+    <div class="panel metric">
+      <div class="metric-label">Throughput</div>
+      <div class="metric-value" id="mRate">—</div>
+      <div class="metric-sub" id="mRateSub">sec / optimizer step</div>
+    </div>
+    <div class="panel metric">
+      <div class="metric-label">ETA</div>
+      <div class="metric-value" id="mETA">—</div>
+      <div class="metric-sub" id="mETASub">—</div>
+    </div>
+  </div>
+
+  <!-- Chart + log side by side -->
+  <div class="grid" style="margin-bottom: 16px;">
+    <div class="panel">
+      <h2>Loss curve (last 200 steps)</h2>
+      <canvas id="lossChart"></canvas>
+      <div class="chart-legend">
+        <span><span class="sw" style="background:#6ee7ff"></span>Total loss</span>
+        <span><span class="sw" style="background:#a5b4fc"></span>CE</span>
+        <span><span class="sw" style="background:#fbbf24"></span>KL</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Recent log lines</h2>
+      <div class="log-tail" id="logTail">—</div>
+    </div>
+  </div>
+
+  <!-- Checkpoints -->
+  <div class="panel" style="margin-bottom: 16px;">
+    <h2>Checkpoints</h2>
+    <div id="ckptList">—</div>
+  </div>
+
+  <div class="footer">
+    Independent of Claude. Close this browser tab, close Claude Desktop — the training keeps running.<br>
+    Served by <code>dashboard_server.py</code>. Reads files written by PID in <code>dflash_training_v3.pid</code>.
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  const lossChart = {
+    canvas: $('lossChart'),
+    ctx: null,
+    lastData: null,
+    resize() {
+      const c = this.canvas;
+      const dpr = window.devicePixelRatio || 1;
+      const w = c.clientWidth, h = c.clientHeight;
+      c.width = w * dpr; c.height = h * dpr;
+      this.ctx = c.getContext('2d');
+      this.ctx.scale(dpr, dpr);
+      if (this.lastData) this.draw(this.lastData);
+    },
+    draw(steps) {
+      this.lastData = steps;
+      const ctx = this.ctx;
+      const W = this.canvas.clientWidth, H = this.canvas.clientHeight;
+      ctx.clearRect(0, 0, W, H);
+      if (!steps || steps.length < 2) {
+        ctx.fillStyle = '#8b94a6'; ctx.font = '12px system-ui';
+        ctx.textAlign = 'center'; ctx.fillText('collecting data…', W/2, H/2);
+        return;
+      }
+      const tail = steps.slice(-200);
+      const pad = {t: 12, r: 10, b: 24, l: 38};
+      const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+      const losses = tail.map(s => s.loss).filter(x => isFinite(x) && x > 0);
+      if (losses.length === 0) return;
+      const yMax = Math.max(...losses) * 1.08;
+      const yMin = 0;
+
+      // Grid + axes
+      ctx.strokeStyle = '#2a3040'; ctx.lineWidth = 1;
+      ctx.fillStyle = '#8b94a6'; ctx.font = '10px system-ui'; ctx.textAlign = 'right';
+      for (let i = 0; i <= 4; i++) {
+        const y = pad.t + plotH * (i/4);
+        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+        const v = yMax - (yMax - yMin) * (i/4);
+        ctx.fillText(v.toFixed(2), pad.l - 4, y + 3);
+      }
+      ctx.textAlign = 'center';
+      ctx.fillText(`step ${tail[0].step}`, pad.l + 20, H - 6);
+      ctx.fillText(`step ${tail[tail.length-1].step}`, W - pad.r - 20, H - 6);
+
+      const xAt = (i) => pad.l + (tail.length <= 1 ? 0 : plotW * (i/(tail.length-1)));
+      const yAt = (v) => pad.t + plotH * (1 - (v - yMin) / (yMax - yMin));
+
+      const drawLine = (values, color, width=2) => {
+        ctx.strokeStyle = color; ctx.lineWidth = width;
+        ctx.beginPath();
+        let started = false;
+        values.forEach((v, i) => {
+          if (!isFinite(v) || v <= 0) return;
+          const x = xAt(i), y = yAt(v);
+          if (!started) { ctx.moveTo(x, y); started = true; }
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      };
+
+      drawLine(tail.map(s => s.ce), '#a5b4fc', 1.3);
+      drawLine(tail.map(s => s.kl), '#fbbf24', 1.3);
+      drawLine(tail.map(s => s.loss), '#6ee7ff', 2);
+    }
+  };
+  window.addEventListener('resize', () => lossChart.resize());
+  requestAnimationFrame(() => lossChart.resize());
+
+  function fmtDuration(s) {
+    if (!s || s < 0) return '—';
+    const d = Math.floor(s / 86400); s -= d * 86400;
+    const h = Math.floor(s / 3600); s -= h * 3600;
+    const m = Math.floor(s / 60);
+    if (d) return `${d}d ${h}h ${m}m`;
+    if (h) return `${h}h ${m}m`;
+    return `${m}m`;
+  }
+  function fmtETA(secs) {
+    if (!secs || secs <= 0) return '—';
+    const when = new Date(Date.now() + secs*1000);
+    return when.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  }
+  function toast(msg, kind='ok') {
+    const t = $('toast');
+    t.textContent = msg;
+    t.className = 'show ' + kind;
+    setTimeout(() => t.className = kind, 2600);
+  }
+
+  // --- Phase indicator logic ---
+  const PHASE_ORDER = ['loading_target', 'starting_training', 'training', 'saving', 'completed'];
+  function setPhase(phase) {
+    const activeIdx = PHASE_ORDER.indexOf(phase);
+    document.querySelectorAll('.phase').forEach((el, i) => {
+      el.classList.remove('active', 'done');
+      if (i < activeIdx) el.classList.add('done');
+      else if (i === activeIdx) el.classList.add('active');
+    });
+  }
+
+  // --- Render state ---
+  function render(data) {
+    // PID + state pill
+    $('pidText').textContent = data.pid ? `PID ${data.pid}` : 'no training PID';
+    const pill = $('statePill');
+    const stateText = $('stateText');
+    const running = data.state === 'running';
+    const paused  = data.state === 'paused';
+    pill.className = 'pill ' + (data.state || 'stopped');
+    if (data.phase === 'completed') {
+      pill.className = 'pill completed';
+      stateText.textContent = 'completed ✓';
+    } else if (paused) { stateText.textContent = 'paused'; }
+    else if (running) { stateText.textContent = 'running'; }
+    else if (data.state === 'stopped') { stateText.textContent = 'stopped'; }
+    else if (data.state === 'not_started') { stateText.textContent = 'not started'; }
+    else { stateText.textContent = data.state; }
+
+    setPhase(data.phase);
+
+    // Progress bar
+    const latest = data.latest;
+    if (latest) {
+      const pct = (latest.step / latest.total_steps) * 100;
+      $('progBar').style.width = pct.toFixed(2) + '%';
+      $('progBar').classList.toggle('paused', paused);
+      $('progLabel').textContent =
+        `${latest.step.toLocaleString()} / ${latest.total_steps.toLocaleString()}  (${pct.toFixed(1)}%)`;
+      $('epochLabel').textContent = `Epoch ${latest.epoch} / ${latest.total_epochs}`;
+      $('mLoss').textContent = latest.loss.toFixed(4);
+      $('mLossSub').textContent = `CE ${latest.ce.toFixed(3)}  ·  KL ${latest.kl.toFixed(3)}`;
+      $('mLR').textContent = latest.lr.toExponential(2);
+    }
+
+    // Rate + ETA
+    if (data.rate_sec_per_step) {
+      $('mRate').textContent = data.rate_sec_per_step.toFixed(2);
+      $('mRateSub').textContent = 'sec / optimizer step';
+    }
+    if (data.eta_seconds) {
+      $('mETA').textContent = fmtDuration(data.eta_seconds);
+      $('mETASub').textContent = 'finishes ≈ ' + fmtETA(data.eta_seconds);
+    }
+
+    // Chart
+    lossChart.draw(data.steps || []);
+
+    // Log tail
+    if (data.recent_lines && data.recent_lines.length) {
+      const el = $('logTail');
+      el.innerHTML = data.recent_lines.map(l => {
+        const esc = l.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        let cls = '';
+        if (/Step \d+\/\d+/.test(l)) cls = 'line-step';
+        else if (/\[Auto-save\]|Checkpoint saved|complete/i.test(l)) cls = 'line-save';
+        else if (/Error|Traceback|NaN|Inf/i.test(l)) cls = 'line-err';
+        return `<span class="${cls}">${esc}</span>`;
+      }).join('\n');
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // Checkpoints
+    const ckEl = $('ckptList');
+    if (data.checkpoints && data.checkpoints.length) {
+      ckEl.innerHTML = data.checkpoints.map(c => {
+        const age = Math.floor((Date.now()/1000 - c.modified) / 60);
+        return `<div class="ckpt-row">
+          <span class="ckpt-name">${c.name}</span>
+          <span class="ckpt-meta">${c.size_mb.toFixed(0)} MB · ${age} min ago</span>
+        </div>`;
+      }).join('');
+    } else {
+      ckEl.innerHTML = '<div class="ckpt-meta">No checkpoints yet.</div>';
+    }
+
+    // Button enablement
+    $('btnPause').disabled  = !running;
+    $('btnResume').disabled = !paused;
+    $('btnCancel').disabled = !(running || paused);
+  }
+
+  // --- Controls ---
+  async function sendAction(action) {
+    try {
+      const r = await fetch(`/api/${action}`, { method: 'POST' });
+      const j = await r.json();
+      if (r.ok) toast('✓ ' + j.action, 'ok');
+      else toast('✗ ' + (j.error || 'failed'), 'err');
+    } catch (e) {
+      toast('✗ ' + e.message, 'err');
+    }
+    await refresh();
+  }
+  $('btnPause').addEventListener('click',  () => {
+    if (confirm('Pause training? Process will freeze (SIGSTOP) and can be resumed at any time.')) sendAction('pause');
+  });
+  $('btnResume').addEventListener('click', () => sendAction('resume'));
+  $('btnCancel').addEventListener('click', () => {
+    if (confirm('Cancel training? Sends SIGTERM — the script will save a checkpoint then exit. Resumable later.')) sendAction('cancel');
+  });
+
+  // --- Poll loop ---
+  async function refresh() {
+    try {
+      const r = await fetch('/api/status', { cache: 'no-store' });
+      const data = await r.json();
+      render(data);
+    } catch (e) {
+      $('stateText').textContent = 'dashboard server unreachable';
+      $('statePill').className = 'pill stopped';
+    }
+  }
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

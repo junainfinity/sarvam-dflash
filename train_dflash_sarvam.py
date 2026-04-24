@@ -292,6 +292,8 @@ def train(args):
     draft_model.layers = draft_model.layers.to(device, dtype=torch.bfloat16)
     draft_model.norm = draft_model.norm.to(device, dtype=torch.bfloat16)
     draft_model.rotary_emb = draft_model.rotary_emb.to(device)
+    # V3: move the learned mask embedding parameter as well
+    draft_model.mask_embedding.data = draft_model.mask_embedding.data.to(device, dtype=torch.bfloat16)
 
     trainable_params = draft_model.get_trainable_parameters()
     num_trainable = draft_model.count_trainable_parameters()

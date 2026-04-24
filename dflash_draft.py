@@ -491,8 +491,10 @@ class DFlashDraftModel(nn.Module):
         if mask_positions is not None:
             mask_positions = mask_positions.to(draft_device)  # [B, S] bool
             # Broadcast mask_embedding [H] to [B, S, H] for selective replace.
-            mask_broadcast = self.mask_embedding.to(hidden_states.dtype) \
-                .view(1, 1, -1).expand(B, S, -1)                 # [B, S, H]
+            # Force device+dtype match regardless of where the param was placed.
+            mask_broadcast = self.mask_embedding.to(
+                device=hidden_states.device, dtype=hidden_states.dtype
+            ).view(1, 1, -1).expand(B, S, -1)                    # [B, S, H]
             hidden_states = torch.where(
                 mask_positions.unsqueeze(-1),                    # [B, S, 1]
                 mask_broadcast,                                  # [B, S, H]
